@@ -1,0 +1,735 @@
+---
+title: "Risk factors in accidental drug related deaths."
+author: "Preeti Pathak"
+date: "`r Sys.time()`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    number_sections: yes
+    code_folding: show
+---
+
+
+
+## Preliminaries
+
+```{r setup, echo=FALSE, cache=FALSE}
+library(knitr); library(rmdformats)
+
+## Global options
+opts_chunk$set(cache=FALSE,
+               prompt=FALSE,
+               tidy=FALSE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+
+```{r load packages}
+library(forcats)
+library(broom)
+library(skimr)
+library(modelr)
+library(Hmisc)
+library(tidyverse)
+library(tableone)
+library(ROCR)
+library(magrittr)
+library(MASS)
+library(rms)
+```
+
+# Task-1 Data Source
+Accidental Drug Related Deaths 2012-June 2017 in Connecticut (CT). This data set is readily available at the following website, which is open for all the public users. 
+https://catalog.data.gov/dataset/accidental-drug-related-deaths-january-2012-sept-2015/resource/44580a89-a260-4844-8ead-35736f395389 
+
+Accidental Drug Related Deaths are increasing in USA. This dataset contains information regarding multiple drug overdose related accidents form 2012 - June 2017 in Connecticut area.
+A "Y" value under the different substance columns indicates that particular substance was detected in the person. Data are derived from an investigation by the Office of the Chief Medical Examiner which includes the toxicity report, death certificate, as well as a scene investigation.
+
+In this study, I am planning to evaluate if I can predict age of an individual ( continuous variable )in drug overdose related accidents using linear regression model. 
+
+In another part of the study, I will see if odds ratio of Alcohol consumption is different among the different drug (Heroin, cocaine, fentanyl, oxycodone,oxymorphone) overdose related accidents . An alcohol could complicating factor with one of these drugs listed.  I want to evaluate if drug overdose related accidents are more common in alcohol drinkers. The original dataset had several other drugs.  However, I restrict my study on major drugs, which are Heroin, Cocaine, Fentanyl, Oxycodone, Oxymorphone  and Alcohol. 
+
+
+# Task-2 Load and tidy the dataset
+```{r}
+project_1<-read.csv("Accidental_Drug_related_deaths-2.csv", stringsAsFactors=FALSE)%>%tbl_df()
+project_1$Heroin<-fct_recode(project_1$Heroin, 
+           Y = "y", 
+           N = "", 
+           N2 = " ")
+project_1$Heroin<-fct_recode(project_1$Heroin, 
+           N = "N2")
+project_1$Cocaine<-fct_recode(project_1$Cocaine, 
+           Y = "y", 
+           N = "")
+project_1$Fentanyl<-fct_recode(project_1$Fentanyl, 
+           Y = "y",
+           Y1="Y ",
+           N = "")
+project_1$Fentanyl<-fct_recode(project_1$Fentanyl, 
+           Y = "Y1")
+project_1$Oxycodone<-fct_recode(project_1$Oxycodone, 
+           Y = "y",
+           N = "")
+project_1$Oxymorphone<-fct_recode(project_1$Oxymorphone, 
+           Y = "y",
+           N = "")
+project_1$Alcohol<-fct_recode(project_1$Alcohol, 
+           Y = "y",
+           N = "")
+project_1
+
+```
+
+```{r}
+project_1$Location<-fct_recode(project_1$Location)
+project_1$Death_City<-fct_recode(project_1$Death_City)
+project_1$Race<-fct_recode(project_1$Race, 
+           Black = "Hispanic, Black")
+          project_1$Sex<-fct_recode(project_1$Sex)
+project_1
+```
+
+There are total 13 variables(column) in the dataset with 999(rows) observations. There was only one "black hispanic race"" individual, I recode it as "Black". 
+
+
+# Task 3: Listing of My Tibble
+
+```{r}
+summary(project_1)
+```
+
+```{r}
+map_df(project_1, function(x) sum(is.na(x)))
+```
+There are total of 13 variables (columns) in the dataset with 999 (rows) observations (rows). There is 1 observation missing the variable `death city` and 2 missing `death location`s. These variables are not likely to truly impact my analyses, as I do not plan to undertake an anlaysis based on geographic location. Therefore, to finalize the variables and simplify the dataset, the variables `Location` and `Death_City`  were deleted from the dataset.
+
+
+```{r}
+project_1F <- subset( project_1, select = -c(Location, Death_City ) )
+project_1F
+```
+```{r}
+project_1F <- project_1F %>%
+    mutate(
+        Race2 = factor(case_when(
+            Race == "White" ~ "1",
+            Race ==" White"~"1",
+            Race == "Hispanic, White" ~ "2",
+            Race == " Hispanic, White" ~ "2",
+            Race == "Black" ~ "3",
+            Race == "Asian,other,unknown" ~ "4")))
+project_1F
+```
+```{r}
+str(project_1F)
+```
+
+
+
+#Task-4 Code book
+
+Variable   | Type        | Details
+---------: | ----------: | ----------------------------------------
+`Case Number`| character   | Drug overdose related deaths identification code 
+`Date`| character | the date on which person died due to drug overdose (mm/dd/YYYY)
+`Sex`| binary | sex (female, male) of a person died
+`Race`| multi-categorical | Race of a dead person (white=1, hispanic white=2, black or                                     hispanic black=3, Asian and other=4) 
+`Age`| quantitative |Person's age at death 
+`Heroin`| binary  |person intoxicated with heroin at the time of death Y=Yes, N= No
+`Cocaine` | binary | person intoxicated with Cocaine at the time of death Y=Yes,N= No
+`Fentanyl`| binary | person intoxicated with Fentanyl at the time of death Y=Yes,N=                                                                                          No
+`Oxycodone`|binary | person intoxicated with Oxycodone at the time of death Y=Yes,N=                                                                                        No
+`Oxymorphone`| binary | person intoxicated with Oxymorphone at the time of death                                                                           Y=Yes, N= No
+`Alcohol`| binary | person intoxicated with Alcohol at the time of death Y=Yes, N= No
+
+
+
+# Task 5: My Subjects
+There are 999 rows in the dataset. Each row describes a person who died due to drug overdose in the Connecticut area between 2012-2015.
+
+# Task 6: My Variables
+There are total 11 variables(column) in the dataset with 999(rows) observations. 
+
+1. CaseNumber
+This is a person's identification code.
+2. Date
+This is the day when person died due to drug overdose or substance abuse (mm/dd/YYYY). 
+3.Sex
+This is a gender female and male died due to drug overdose or substance abuse.
+4. Race
+This is the person's race. 
+5. Age
+Age of the person at the time of death (in years). 
+6. Heroin
+ Person intoxicated with heroin at the time of death Y=Yes, N= No
+7. Cocaine
+Person intoxicated with cocaine at the time of death Y=Yes, N= No
+8. Fentanyl
+Person intoxicated with fentanyl at the time of death Y=Yes, N= No
+9. Oxycodone
+Person intoxicated with Oxycodone at the time of death Y=Yes, N= No
+10. Oxymorphone
+Person intoxicated with Oxymorphone at the time of death Y=Yes, N= No
+11.Alcohol
+Person intoxicated with alcohol at the time of death Y=Yes, N= No
+
+
+
+#Task-7 Linear Regression Model
+
+ Predict the quantitative outcome Age using some combination of the following seven variables:
+ 
+ 
+1. Race
+2. Sex
+3. Heroin
+4. Cocaine
+5. Fentanyl
+6. Oxymorphone
+7. Alcohol
+
+#Task-8 Logistic Regression model
+
+Predict the binary outcome Alcohol using some combination of the following seven variables:
+ 
+1. Race
+2. Sex
+3. Heroin
+4. cocaine
+5. Fentanyl
+6. Oxycodone
+7. Oxymorphone
+
+# Task 9: Affirmation
+
+This data set meets almost all requirements specified in the project instructions.
+This dataset describes  999 deaths due to substance abuse or drug overdose.  
+I am considering atleat seven predictors for each regression model, and include at least one quantitative (Age) and Race as a multi-categorical variable in each model. This dataset can be shared with anyone without any conditions.
+
+
+# Task-10 Linear Regression Model
+
+
+```{r}
+plot(spearman2(Age ~ Race+Sex+Heroin+Cocaine+Fentanyl+Oxymorphone+Oxycodone+Alcohol, data=project_1F))
+```
+
+Spearman correlation plot indicates there is a significant nonlinearity involved in the heroin,oxycodone, race and Sex predictors. Since, Heroin and sex are categorical variables; I will consider Heroin and Race interaction. Sex predictor also show significant nonlinearity therefore, I will consider sex and oxycodone interaction in the model. 
+
+```{r Distribution of Age}
+source("Love-boost.R")
+eda.1sam(dataframe= project_1F,
+         variable=project_1F$Age, 
+         x.title="Digit Symbol Score",
+         ov.title="Age Outcome Variable Normality Assessment")
+
+```
+Output age is fairly normally distributed, however distribution is not perfect.  
+
+```{r age and race related deaths}
+P1<-ggplot(subset(project_1F, Heroin != "N"),aes(x=Race2, y=Age, color=Race2))+
+  geom_boxplot()+
+  geom_jitter(position = position_jitter(width=0.1), alpha=0.1)+
+  labs(title= " Heroin",
+       x="Race", y="Age")+
+  theme_bw()
+P2<-ggplot(subset(project_1F, Cocaine != "N"),aes(x=Race2, y=Age, color=Race2))+
+  geom_boxplot()+
+  geom_jitter(position = position_jitter(width=0.1), alpha=0.1)+
+  labs(title= " cocaine",
+       x="Race", y="Age")+
+  theme_bw()
+P3<-ggplot(subset(project_1F, Oxycodone != "N"),aes(x=Race2, y=Age, color=Race2))+
+  geom_boxplot()+
+  geom_jitter(position = position_jitter(width = 0.1),alpha=0.1)+
+  labs(title= "Oxycodone",
+       x="Race", y="Age")+
+  theme_bw()
+P4<-ggplot(subset(project_1F, Fentanyl != "N"),aes(x=Race2, y=Age, color=Race2))+
+  geom_boxplot()+
+  geom_jitter(position = position_jitter(width=0.1),alpha=0.1)+
+  labs(title= " Fentanyl",
+       x="Race", y="Age")+
+  theme_bw()
+P5<-ggplot(subset(project_1F, Oxymorphone != "N"),aes(x=Race2, y=Age, color=Race2))+
+  geom_boxplot()+
+  geom_jitter(position = position_jitter(width=0.1),alpha=0.1)+
+  labs(title= " Oxymorphone",
+       x="Race", y="Age")+
+        theme_bw()
+P6<-ggplot(subset(project_1F, Alcohol != "N"),aes(x=Race2, y=Age, color=Race2))+
+  geom_boxplot()+
+  geom_jitter(position = position_jitter(width=0.1), alpha=0.1)+
+  labs(title= "Alcohol",
+       x="Race", y="Age")+
+        theme_bw() 
+gridExtra::grid.arrange(P1, P2, P3, P4,P5,P6)
+
+```
+Above plot indicates that Heroin overdose related deaths are more common among Race=1 (white), while oxymorphone overdose related deaths are completely absent in Race=2 (white, Hispanic) and Race=3 (Black). Overall,  drug overdose related accidents are more common in white or white hispanic race in this dataset.
+
+```{r alcohol overdose in age and sex }
+P7<-ggplot(subset(project_1F, Heroin != "N"),aes(x=Alcohol, y=Age, color=Alcohol))+
+  geom_boxplot(notch = TRUE)+
+  geom_jitter(position = position_jitter(width=0.1), alpha=0.1)+
+  labs(title= "Age Vs Alcohol consuption in heroin overdose accidents",
+       x="Alcohol", y="Age")+
+        theme_bw() 
+P8<-ggplot(subset(project_1F, Heroin != "N"),aes(x=Sex, y=Age, color=Sex))+
+  geom_boxplot(notch = TRUE)+
+  geom_jitter(position = position_jitter(width=0.1), alpha=0.1)+
+  labs(title= "Age Vs sex specific Alcohol consuption in heroin overdose accidents",
+       x="Alcohol", y="Age")+
+        theme_bw() 
+gridExtra::grid.arrange(P7, P8)
+```
+To understand if Heroin overdose related accidents are common in alcohol drinkers in different sex, heroin overdose accidents were plotted against with or without alcohol overdose. Above plot shows that in heroin overdose accidents, alcohol consumption is more common in sex male than in sex female.
+
+```{r kitchen sink without interaction}
+lm_model<-lm(Age~Race+Sex+Heroin+Cocaine+Fentanyl+Oxymorphone+Oxycodone+Alcohol, data=project_1F)
+summary(lm_model)
+```
+Kitchen sink model suggests oxycodone, heroin,sex are significant effect on output age. 
+
+```{r linear interaction model}
+lmmodel_int<-lm(Age~Race*Heroin+Sex*Oxycodone+Cocaine+Fentanyl+Oxymorphone+Alcohol, data=project_1F)
+summary(lmmodel_int)
+```
+```{r}
+anova(lm_model,lmmodel_int)
+```
+ Two models were built one model without interaction and another model with interaction term. Interaction between Heroin and race and sex and oxycodone has significant impact in the model, which accounted for 8% variation. Overall interaction costs 4 degrees of freedom. Unfortunately, R square of the model is not very impressive.
+
+```{r}
+par(mfrow = c(2, 2))
+plot(lmmodel_int)
+```
+Above plot indicate model with interaction has slight problem with equal variance and normality. To improve and simplify the model predictor selection was performed.
+
+```{r}
+library(leaps)
+```
+
+```{r}
+bs_preds <- with(project_1F,
+                 cbind(Race,Sex,Heroin,Cocaine,Oxymorphone,Oxycodone,Alcohol))
+bs_subs <- regsubsets(bs_preds,
+      y = project_1F$Age,
+      nvmax = 6)
+bs_mods <- summary(bs_subs)
+bs_mods$which
+
+```
+```{r}
+aic.c <- 325 * log( bs_mods$rss / 325) + 2 * 2:7 + 
+                      (2 * 2:7 * (2:7 + 1) / (325 - 2:7 - 1))
+best_mods_1 <- data_frame(
+    k = 2:7,
+    r2 = bs_mods$rsq,
+    adjr2 = bs_mods$adjr2,
+    cp = bs_mods$cp,
+    aic.c = aic.c,
+    bic = bs_mods$bic
+)
+
+best_mods <- cbind(best_mods_1, bs_mods$which)
+
+best_mods
+```
+
+```{r}
+p1 <- ggplot(best_mods, aes(x = k, y = adjr2,
+                            label = round(adjr2,2))) +
+    geom_line() +
+    geom_label() +
+    geom_label(data = subset(best_mods,
+                             adjr2 == max(adjr2)),
+               aes(x = k, y = adjr2, label = round(adjr2,2)),
+               fill = "yellow", col = "blue") +
+    theme_bw() +
+    scale_x_continuous(breaks = 2:8) +
+    labs(x = "# of predictors (including intercept)",
+         y = "Adjusted R-squared")
+p2 <- ggplot(best_mods, aes(x = k, y = cp,
+                            label = round(cp,1))) +
+    geom_line() +
+    geom_label() +
+    geom_abline(intercept = 0, slope = 1,
+                col = "red") +
+    theme_bw() +
+    scale_x_continuous(breaks = 2:8) +
+    labs(x = "# of predictors (including intercept)",
+         y = "Mallows' Cp")
+p3 <- ggplot(best_mods, aes(x = k, y = aic.c,
+                             label = round(aic.c,1))) +
+    geom_line() +
+    geom_label() +
+    geom_label(data = subset(best_mods, aic.c == min(aic.c)),
+               aes(x = k, y = aic.c), fill = "pink", 
+               col = "red") +
+    theme_bw() +
+    scale_x_continuous(breaks = 2:8) +
+    labs(x = "# of predictors (including intercept)",
+         y = "Bias-Corrected AIC")
+p4 <- ggplot(best_mods, aes(x = k, y = bic,
+                            label = round(bic,1))) +
+    geom_line() +
+    geom_label() +
+    geom_label(data = subset(best_mods, bic == min(bic)),
+               aes(x = k, y = bic),
+               fill = "lightgreen", col = "blue") +
+    theme_bw() +
+    scale_x_continuous(breaks = 2:8) +
+    labs(x = "# of predictors (including intercept)",
+         y = "BIC")
+gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2)
+```
+Predictor alcohol was dropped from all the models. Cp statistics show model-6  with predictors race, sex , heroin, cocaine, oxymorphone and oxycodone could be the better choice. However, AIC and BIC show model-3 with predictors race, heroin, oxycodone could be the better choice. 
+
+
+
+```{r kitchen sink with interaction transformation}
+boxcox(lmmodel_int)
+```
+Above Box Cox did not suggest model transformation so, I did not try the transformation of the output. 
+
+```{r}
+glance(lmmodel_int)
+```
+
+
+All models have two interaction terms Race(interaction)Heroin and Sex(interaction)Oxycodone
+
+According to anova both interaction terms were significant therefore, I added those in every model below.  
+
+lmmodel_int-:Age~ Race(interaction)Heroin, Sex(interaction)Oxycodone, Oxymorphone, Alcohol,Cocaine
+model-6-: Age~Race(interaction)Heroin, Sex(interaction)Oxycodone, Cocaine
+model-3-: Age~Race(interaction)Heroin,oxycodone
+
+
+All above models were tested to make prediction as follows. 
+
+
+```{r prediction kitchen sink with interaction}
+set.seed(432)
+final1pre <- project_1F %>%
+crossv_kfold(k = 10) %>%
+mutate(model = map(train, ~ lm(Age~Race*Heroin+Sex*Oxycodone+Cocaine+Fentanyl+Oxymorphone+Alcohol
+, data = .)))
+finalpred <- final1pre %>%
+unnest(map2(model, test, ~ augment(.x, newdata = .y)))
+head(finalpred)
+```
+
+```{r}
+final_pred<- finalpred %>%
+summarize(Model = "lmmodel_int",
+RMSE = sqrt(mean((Age - .fitted) ^2)),
+MAE = mean(abs(Age - .fitted)))
+final_pred
+```
+```{r}
+finalpred %>%
+    mutate(errors = Age - .fitted) %>%
+    ggplot(., aes(x = errors)) +
+    geom_histogram(bins = 30, fill = "darkviolet", col = "yellow") + 
+    labs(title = "Cross-Validated Errors in Prediction of Age",
+         subtitle = "Using a model (lmmodel_int) including all predictors",
+         x = "Error in predicting Age")
+```
+
+Further to understand how well this model makes prediction, 10 fold cross validation was performed, which gave high root mean squared prediction error = 12.2 and mean absolute prediction error = 10.2.Overall this model did not show better prediction of Age when all predictors Race,Heroin,Sex, Alcohol, Cocaine,Fentanyl,Oxymorphone,Oxycodone are accounted for. 
+
+Based on above plots and mellow's Cp statistics model-6 without alcohol and oxymorphone predictors were built if this new model will give better prediction of age.
+  
+
+```{r without alcohol and oxymorphone}
+lmmod_6<-lm(Age~Race*Heroin+Sex*Oxycodone+Cocaine+Fentanyl, data=project_1F)
+summary(lmmod_6)
+```
+```{r}
+set.seed(432)
+final1pre_2 <- project_1F %>%
+crossv_kfold(k = 10) %>%
+mutate(model = map(train, ~ lm(Age~Race*Heroin+Sex*Oxycodone+Cocaine+Fentanyl
+, data = .)))
+finalpred_2 <- final1pre_2 %>%
+unnest(map2(model, test, ~ augment(.x, newdata = .y)))
+head(finalpred_2)
+```
+
+
+```{r}
+final_pred_2<- finalpred_2 %>%
+summarize(Model = "lmmod_6",
+RMSE = sqrt(mean((Age - .fitted) ^2)),
+MAE = mean(abs(Age - .fitted)))
+final_pred_2
+
+```
+
+```{r}
+finalpred_2 %>%
+    mutate(errors = Age - .fitted) %>%
+    ggplot(., aes(x = errors)) +
+    geom_histogram(bins = 30, fill = "darkviolet", col = "yellow") + 
+    labs(title = "Cross-Validated Errors in Prediction of Age",
+         subtitle = "Using a model (lmmod_6) excluding Alcohol and Oxymorphone predictors",
+         x = "Error in predicting Age")
+```
+```{r without alcohol, oxymorphone, fentanyl and sex predictors }
+lmmod_3<-lm(Age~Race*Heroin+Oxycodone, data=project_1F)
+summary(lmmod_3)
+```
+
+```{r}
+set.seed(432)
+final1pre_3 <- project_1F %>%
+crossv_kfold(k = 10) %>%
+mutate(model = map(train, ~ lm(Age~Race*Heroin+Oxycodone
+, data = .)))
+finalpred_3 <- final1pre_3 %>%
+unnest(map2(model, test, ~ augment(.x, newdata = .y)))
+head(finalpred_3)
+```
+
+```{r}
+final_pred_3<- finalpred_3 %>%
+summarize(Model = "lmmod_3",
+RMSE = sqrt(mean((Age - .fitted) ^2)),
+MAE = mean(abs(Age - .fitted)))
+final_pred_3
+```
+
+Tenfold cross validation followed by age prediction using three different models kitchen sink with interaction, model-6 and model-3 show  high root mean squared prediction error = 12.25, 12.23,12.28, respectively. 
+Mean absolute prediction error = 10.22, 10.21, 10.25 for kitchen sink with interaction, model-6 and model-3 respectively. 
+
+From kitchen sink model to model-6 without alcohol and oxymorphone predictors, RMSE and MAE lowered significantly. Overall model-6  is my final model , which accounted 7% variation.  
+
+
+
+```{r}
+lm_final<-ols(Age~Race*Heroin+Sex*Oxycodone+Cocaine+Fentanyl, x=TRUE,y=TRUE, data=project_1F)
+lm_final
+```
+
+```{r}
+validate(lm_final)
+```
+
+In the new data above model will account for 5.8% variation and 149.96 MSE. 
+
+Overall, combination of all predictors in the dataset did not predict age with considerable accuracy. However, this model gives idea that heroin addiction is race specific it does not depend on age of the person.
+
+```{r final equation of linear model}
+summary(lmmod_6)
+```
+
+Final Equation-:
+
+Age= 53.03(intercept)-6.29(Black)-9.04(White,Hispanic)-7.86(white)-13(Heroin)-1.15(male)+4.95(oxycodone)+1.15(cocaine)-1.61(Fentanyl)+15.37(Black:heroinY)+8.02(white:HeroinY)-3.9(male:OxycodoneY)
+
+
+# Task-11 Logistic Regression Model
+
+Here I will predict the binary outcome Alcohol using some combination of the following seven variables:
+ 
+1. Race
+2. Sex
+3. Heroin
+4. cocaine
+5. Fentanyl
+6. Oxycodone
+7. Oxymorphone
+
+In this model,  I want to compare odds of alcohol in different drug overdose groups. Therefore, I choose not to eliminate the predictors from the model.  
+
+First I need to mutate the factor Heroin,cocaine,Fentanyl,Oxycodone,Oxymorphone into binary 0 = no drug and 1= specified drug overdose.
+
+```{r}
+project_1F_New <- project_1F %>%
+    mutate(
+        Alcohol = factor(case_when(
+            Alcohol == "Y" ~ "1",
+            Alcohol =="N"~"0")))
+```
+
+```{r}
+project_1F_New <-project_1F_New %>%
+    mutate(
+        Heroin = factor(case_when(
+            Heroin == "Y" ~ "1",
+            Heroin =="N"~"0")))
+```
+
+```{r}
+project_1F_New <- project_1F_New %>%
+    mutate(
+        Fentanyl = factor(case_when(
+            Fentanyl == "Y" ~ "1",
+            Fentanyl =="N"~"0")))
+```
+
+```{r}
+project_1F_New <- project_1F_New %>%
+    mutate(
+        Oxycodone = factor(case_when(
+            Oxycodone == "Y" ~ "1",
+            Oxycodone =="N"~"0")))
+```
+
+```{r}
+project_1F_New <- project_1F_New %>%
+    mutate(
+        Oxymorphone = factor(case_when(
+            Oxymorphone == "Y" ~ "1",
+            Oxymorphone =="N"~"0")))
+```
+
+```{r}
+project_1F_New <- project_1F_New %>%
+    mutate(
+        Cocaine = factor(case_when(
+            Cocaine == "Y" ~ "1",
+            Cocaine =="N"~"0")))
+project_1F_New 
+```
+
+
+ 
+```{r}
+plot(spearman2(Alcohol~Heroin+Age+Race2+Sex+Heroin+Cocaine+Oxycodone+Fentanyl, data=project_1F_New))
+```
+According to plot above predictors Fentanyl and sex are important variables. I want to evaluate if sex and fentanyl interaction is significant. 
+
+```{r logistic interaction}
+logic_Int_lr<-lrm(Alcohol~Heroin+Age+Heroin+Race2+Cocaine+Oxycodone+Sex*Fentanyl, x=TRUE,y=TRUE, data = project_1F_New)
+logic_Int_lr
+```
+
+```{r}
+anova(logic_Int_lr)
+```
+
+```{r}
+plot(anova(logic_Int_lr))
+```
+The interaction between sex and fentanyl is not significant according to the anova statistics. Therefore, model without interaction is considered to predict the alcohol as output. 
+```{r kitchen sink logistic}
+logic_lr<-lrm(Alcohol~Heroin+Age+Heroin+Race2+Cocaine+Oxycodone+Sex+Fentanyl, x=TRUE,y=TRUE, data = project_1F_New)
+logic_lr
+```
+
+Above summary indicates heroin, cocaine, oxycodone, sex and fentanyl are significantly associated with output alcohol overdose. overall this model is not very remarkable in making predictions since Nagelkerke R2 = 0.0422 and C = 0.595 which is as good as just guessing output alcohol randomly. 
+
+
+
+```{r}
+set.seed(432001) 
+validate(logic_lr, B = 100)
+```
+In the new data this model will account for 2.27% variation with ROC= 0.595, which is not very impressive.    
+
+
+```{r}
+plot(calibrate(logic_lr))
+```
+
+Model variate substantially when predicted probability of alcohol increases from 0.3 and 0.7. This model makes most of the probability of alcohol overdose is between 0.4 to 0.6, while there are not many predictions from 0.7 to 0.8.  
+
+```{r}
+dd=datadist(project_1F_New)
+options(datadist="dd")
+summary(logic_lr)
+```
+
+
+
+```{r}
+dd=datadist(project_1F_New)
+options(datadist="dd")
+plot(summary(logic_lr))
+```
+Above summary with odds retio indicates that odds of getting drunk (alochol) are higher in heroin overdose accidents, while odds of getting drunk are lower in cocaine, oxycodone and fentanyl overdose related accidents. Alcohol drinking is not associated with predictor race, while alcohol drinking is significantly higher in male than female in drug overdose related accidents. 
+It is very difficult to understand if  alcohol drinking cause accidental overdose of heroin or alcohol increased the potency of heroin , which cause accidental death. However, this model indicates alcohol could be a risk factor for drug overdose related deaths in the male sex.  
+
+# Task 12a: Conclusions-1
+
+
+```{r}
+dd=datadist(project_1F)
+options(datadist="dd")
+plot(summary(lm_final))
+```
+Above plot shows that race black has significantly higher age than white race in heroin overdose related accidents. Heroin overdose related accidents are commonly observed in 8 years older black (race) individuals compared to white individuals.
+
+Age is not significantly associated with any other factors since confidence interval includes zero.
+
+
+
+```{r}
+dd=datadist(project_1F)
+options(datadist="dd")
+plot(nomogram(lm_final))
+```
+
+
+According to this nomogram 
+white, male person with heroin alone overdose output age= 37 years
+Black, male person with heroin alone overdose output age= 45 years
+
+
+```{r}
+glance(lm_final)
+```
+```{r}
+head(final_pred_2)
+```
+
+Overall, combination of all predictors in the dataset did not predict age with considerable accuracy. Final model accounted for 7.4% variation.However, this model gives idea that heroin addiction is race specific. Combination of other drugs with heroin are also significantly could alter the output age. 
+
+
+
+
+#Task 12b: Conclusions-2
+
+```{r}
+dd=datadist(project_1F_New)
+options(datadist="dd")
+plot(summary(logic_lr))
+```
+
+```{r}
+plot(calibrate(logic_lr))
+```
+In the logistic regression model, odds of getting drunk (alcohol overdose) are higher in heroin overdose accidents, while odds of getting drunk are lower in cocaine, oxycodone and fentanyl overdose related accidents. Alcohol drinking is not associated with predictor race, while alcohol drinking is significantly higher in male than female in drug overdose related accidents.
+
+Final calibrated model shows a lot of variation when predicted probability of alcohol increases from 0.3. The model also shows variation at the higher end when probability of alcohol rises from 0.6 to 0.7. 
+
+This model makes most of the predictions of probability of alcohol overdose between 0.4 and 0.6, while there are not many predictions between 0.7 and 0.8. Overall, Final  logistic model account for 4% variation with ROC=0.595. 
+
+Although above statistics and ROC =0.595 are not very impressive, this model identifies an alcohol overdose as a risk factor in heroin overdose related accidents.
+It is very difficult to understand if alcohol drinking causes accidental overdose of heroin or alcohol increases the potency of heroin, which may have caused accidental death.  
+
+Overall, logistic model identifies a trend alcohol as risk factor in heroin overdose related accidents.
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
